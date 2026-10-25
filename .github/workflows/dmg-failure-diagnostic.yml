@@ -1,0 +1,69 @@
+name: One synthetic DMG failure observation
+
+on:
+  push:
+    branches: [verify/dmg-failure-observation-20261025]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synthetic-dmg-observation-20261025
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    if: >-
+      github.repository == 'sunxiuguo/rea' &&
+      github.ref == 'refs/heads/verify/dmg-failure-observation-20261025' &&
+      github.run_attempt == '1' &&
+      github.event.head_commit.message == 'test: capture one synthetic DMG failure (20261025T1825Z)'
+    runs-on: macos-15-arm64
+    timeout-minutes: 30
+    env:
+      HUSKY: "0"
+      TURBO_TOKEN: ""
+      TURBO_TEAM: ""
+      TURBO_CACHE: "local:rw"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 8
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Verify source and supply declared npm locally
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor e93e3b1e7d6e7e4f49c2de24b92452ec29e853f8 HEAD
+          test "$(shasum -a 256 scripts/verify/apple/dmg-failure-diagnostic.mjs | cut -d ' ' -f 1)" = "2a7bee57e6c312e8420bd9604f8a77c14fc25c947c169cd625042bc316bb928d"
+          test "$(shasum -a 256 scripts/verify/apple/dmg-failure-diagnostic.test.mjs | cut -d ' ' -f 1)" = "04e90089d5e5a34ac9caff0500e22d34af3c3a1c671f0745d5da4dd9f254eec5"
+          test "$(shasum -a 256 scripts/verify/apple/macos-bundle.mjs | cut -d ' ' -f 1)" = "4153e1b6288e607a68feec10e06ceca834b14a4043b143b77a1f27ab485fb9fd"
+          test "$(shasum -a 256 package.json | cut -d ' ' -f 1)" = "6fba99febdbd5c0b18b23a7e4afc43a62d2e75a0482b1b7950ec3e85d30c85ce"
+          test "$(shasum -a 256 package-lock.json | cut -d ' ' -f 1)" = "c372661e57ca5bd126392038dead7cb20f03b07ff3faec9351b5328a39b9991f"
+          test "$(node --version)" = "v24.18.0"
+          test "$(node -p 'process.platform + ":" + process.arch')" = "darwin:arm64"
+          test "$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).packageManager')" = "npm@11.16.0"
+          npm install --prefix "$RUNNER_TEMP/rea-pinned-npm" --ignore-scripts --no-audit --no-fund npm@11.16.0
+          echo "$RUNNER_TEMP/rea-pinned-npm/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Check synthetic diagnostic guards
+        run: |
+          test "$(npm --version)" = "11.16.0"
+          node --test scripts/verify/apple/dmg-failure-diagnostic.test.mjs
+      - name: Install unchanged locked dependencies
+        run: npm ci
+      - name: Observe original synthetic Apple sequence once
+        run: |
+          npm run verify:keyed-archive
+          npm run verify:asset-catalog
+          npm run verify:macos-bundle
+      - name: Preserve only projected failed DMG observation
+        if: ${{ !cancelled() && hashFiles('.cache/verification/apple-dmg-diagnostic.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-dmg-failure-observation
+          path: .cache/verification/apple-dmg-diagnostic.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
