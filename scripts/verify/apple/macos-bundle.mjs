@@ -19,6 +19,8 @@ import { verifyDylibResolution } from "./macos-dylib-e2e.mjs";
 import { verifyMachOOccurrences } from "./macho-occurrences.mjs";
 import { verifyNativeProvenance } from "./native-provenance.mjs";
 
+import { retainDmgFailure } from "./dmg-failure-diagnostic.mjs";
+
 const exec = promisify(execFile);
 
 await preflightMacosBundleFixture();
@@ -104,7 +106,16 @@ try {
   ];
   const anatomies = [];
   for (const { target, format, applicationRoot } of containers) {
-    const inventory = await artifactCliEvidence("inspect-artifact", target);
+    let inventory;
+    try {
+      inventory = await artifactCliEvidence("inspect-artifact", target);
+    } catch (failure) {
+      if (format === "dmg") await retainDmgFailure(
+        { failure, imagePath: dmg, temporaryRoot: tmpdir() },
+        ".cache/verification/apple-dmg-diagnostic.json",
+      );
+      throw failure;
+    }
     const input = join(root, `${format}-projection.json`);
     await writeFile(input, JSON.stringify({ inventory_evidence: [inventory] }));
     const evidence = await artifactCliEvidence(
