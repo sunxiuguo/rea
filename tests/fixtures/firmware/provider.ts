@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { access, rm, writeFile } from "node:fs/promises";
+import { access, realpath, rm, writeFile } from "node:fs/promises";
 import { expect, onTestFinished } from "vitest";
 import { createFirmwareAnalysisProvider } from "../../../src/composition/firmware.js";
 import { FirmwareAnalysisService } from "../../../src/application/firmware/FirmwareAnalysisService.js";
@@ -14,6 +14,9 @@ export const firmwareFixture = async (mode = "normal", banner?: string) => {
   const path = join(root, "input.bin");
   await writeFile(path, Buffer.from("fixture-input-data"));
   onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const binwalkPlaceholder = join(root, "binwalk-placeholder");
+  await writeFile(binwalkPlaceholder, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const binwalkCommand = await realpath(binwalkPlaceholder);
   const launches: {
     cwd: string | undefined;
     pid: number | undefined;
@@ -23,16 +26,14 @@ export const firmwareFixture = async (mode = "normal", banner?: string) => {
   const provider = createFirmwareAnalysisProvider(
     {
       ...process.env,
-      REA_BINWALK_COMMAND: "/usr/bin/true",
+      REA_BINWALK_COMMAND: binwalkCommand,
       REA_UNBLOB_COMMAND: process.execPath,
     },
     async (options) => {
       const start = options.arguments.indexOf("--") + 2;
       const args = options.arguments.slice(start);
       const engine =
-        options.arguments[start - 1]?.endsWith("/true") === true
-          ? "binwalk"
-          : "unblob";
+        options.arguments[start - 1] === binwalkCommand ? "binwalk" : "unblob";
       const spawned = await spawnOwnedProviderProcess({
         ...options,
         command: process.execPath,
